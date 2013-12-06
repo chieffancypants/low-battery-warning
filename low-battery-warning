@@ -10,33 +10,42 @@ test $UID -eq 0 || {
 set -e
 
 is_charging () {
-  acpi -b | grep Charging > /dev/null
+  grep -P "charging state:\s+(charging|charged)" /proc/acpi/battery/*/state > /dev/null
 }
 
 battery_level () {
   #parse acpi output
-  x=$(acpi -b)
-  x=${x#*harging, }
-  x=${x%\%*};
-  echo $x
+  current=`grep -Eo "remaining capacity:\s+[0-9]+" /proc/acpi/battery/*/state | awk '{print $3}'`
+  total=`grep -Eo "design capacity:\s+[0-9]+" /proc/acpi/battery/*/info | awk '{print $3}'`
+  percent=`bc << EOF
+100.0 * $current / $total
+EOF
+`
+  echo $percent
 }
 
 # this is the backlight on my archbookair,
 # your computer may have something similar.
-KBBLIGHT='/sys/class/leds/smc::kbd_backlight'
+KBBLIGHT='/sys/class/backlight/*/'
 
 while true; do
 
   # poll battery level every 10 seconds
   # if the level is too low, go into warn loop
-
   test $(battery_level) -lt 10 && {
+
+    currentBrightness=`cat $KBBLIGHT/brightness`
+    dimValue=`bc << EOF
+$currentBrightness / 4
+EOF
+`
+
     # flash the backlight until someone plugs in the backlight.
-    until is_charging; do
-      echo 100 > $KBBLIGHT/brightness
-      sleep 0.5
-      echo 0 > $KBBLIGHT/brightness
-      sleep 0.5
+    until `is_charging`; do
+      echo $dimValue > $KBBLIGHT/brightness
+      sleep 1
+      echo $currentBrightness > $KBBLIGHT/brightness
+      sleep 1
     done
   }
 
